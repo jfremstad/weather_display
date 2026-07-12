@@ -24,3 +24,5 @@ erl_crash.dump
 
 # ignore macOS files
 .DS_Store
+
+usb_fel_loaders/
