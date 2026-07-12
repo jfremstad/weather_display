@@ -151,6 +151,7 @@ defmodule NameBadge.Weather do
     %{
       "temperature" => %{"value" => temp},
       "feelsLike" => %{"value" => temp_feels_like},
+      "dewPoint" => %{"value" => dewpoint},
       "precipitation" => %{
         "min" => precip_min,
         "max" => precip_max,
@@ -195,6 +196,7 @@ defmodule NameBadge.Weather do
       feels_like: temp_feels_like,
       wind_speed: wind_speed,
       wind_gust: wind_gust,
+      dewpoint: dewpoint,
       timestamp: timestamp,
       precipitation: %{min: precip_min, max: precip_max},
       uv: uv,

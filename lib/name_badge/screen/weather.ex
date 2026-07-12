@@ -126,6 +126,9 @@ defmodule NameBadge.Screen.Weather do
     temps =
       Enum.map(next_8, fn forecast -> "[#{round(forecast.temperature)}]" end) |> Enum.join(", ")
 
+    dewpoints =
+      Enum.map(next_8, fn forecast -> "[#{round(forecast.dewpoint)}]" end) |> Enum.join(", ")
+
     precips =
       Enum.map(next_8, fn forecast ->
         if forecast.precipitation.max == forecast.precipitation.min do
@@ -147,6 +150,7 @@ defmodule NameBadge.Screen.Weather do
       
       [*Tid*], #{times},
       [*Temp*], #{temps},
+      [*Dugg*], #{dewpoints},
       [*Regn*], #{precips},
       [*UV*], #{uvs}
     )
@@ -217,8 +221,9 @@ defmodule NameBadge.Screen.Weather do
           assign(screen,
             weather: nil,
             loading: false,
-            error: "Unable to fetch weather data",
+            error: "Unable to fetch weather data"
           )
+
           {:noreply, screen}
 
         weather_data ->
