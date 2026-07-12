@@ -29,17 +29,7 @@ defmodule NameBadge.Layout do
   end
 
   defp icons_markup() do
-    voltage = NameBadge.Battery.voltage()
-
-    battery_icon =
-      cond do
-        NameBadge.Battery.charging?() -> "battery-charging.png"
-        voltage > 4.0 -> "battery-100.png"
-        voltage > 3.8 -> "battery-75.png"
-        voltage > 3.6 -> "battery-50.png"
-        voltage > 3.4 -> "battery-25.png"
-        true -> "battery-0.png"
-      end
+    battery_percentage = NameBadge.Battery.percentage()
 
     wifi_icon =
       if NameBadge.Network.connected?(@wlan0_property), do: "wifi.png", else: "wifi-slash.png"
@@ -59,7 +49,7 @@ defmodule NameBadge.Layout do
       dx: 24pt,
       box(height: 16pt, stack(dir: ltr, spacing: 8pt,
         align(horizon, text(size: 14pt)[#{current_time}]),
-        image("images/icons/#{battery_icon}"),
+        align(horizon, text(size: 14pt)[#{battery_percentage} %]),
         image("images/icons/#{wifi_icon}"),
         image("images/icons/#{link_icon}"),
       ))

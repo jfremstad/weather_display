@@ -9,9 +9,6 @@ defmodule NameBadge.Weather do
   require Logger
 
   defstruct [
-    :latitude,
-    :longitude,
-    :location_name,
     :weather_data,
     :last_updated,
     :timer,
@@ -27,7 +24,9 @@ defmodule NameBadge.Weather do
   @call_timeout 5_000
 
   # API URLs
-  @openmeteo_url "https://api.open-meteo.com/v1/forecast"
+  @yr_next90 "https://www.yr.no/api/v0/locations/1-2258827/forecast/now?language=nb"
+  @yr_now "https://www.yr.no/api/v0/locations/1-2258827/forecast/currenthour"
+  @yr_forecast "https://www.yr.no/api/v0/locations/1-2258827/forecast"
 
   # Client API
 
@@ -59,24 +58,6 @@ defmodule NameBadge.Weather do
     GenServer.cast(__MODULE__, :refresh_weather)
   end
 
-  @doc """
-  Get the current location name (e.g., "Berlin, Germany").
-  Returns nil if not available.
-  """
-  def get_location_name do
-    try do
-      GenServer.call(__MODULE__, :get_location_name, @call_timeout)
-    catch
-      :exit, {:timeout, _} ->
-        Logger.warning("Weather service location name call timed out")
-        nil
-
-      :exit, {:noproc, _} ->
-        Logger.warning("Weather service not available for location name")
-        nil
-    end
-  end
-
   # Server Callbacks
 
   @impl GenServer
@@ -90,20 +71,13 @@ defmodule NameBadge.Weather do
         failure_count: 0
     }
 
-    # Schedule initialization after a short delay to let TimezoneService start first
-    :timer.send_after(1_000, :initialize)
-
+    send(self(), :initialize)
     {:ok, initial_state}
   end
 
   @impl GenServer
   def handle_call(:get_current_weather, _from, state) do
     {:reply, state.weather_data, state}
-  end
-
-  @impl GenServer
-  def handle_call(:get_location_name, _from, state) do
-    {:reply, state.location_name, state}
   end
 
   @impl GenServer
@@ -114,36 +88,18 @@ defmodule NameBadge.Weather do
 
   @impl GenServer
   def handle_info(:initialize, state) do
-    case get_location_from_timezone_service() do
-      {:ok, lat, lon, location_name} ->
-        Logger.info("Weather location: #{lat}, #{lon} (#{location_name})")
-
-        new_state = %{
-          state
-          | latitude: lat,
-            longitude: lon,
-            location_name: location_name
-        }
-
-        # Schedule periodic updates
-        case :timer.send_interval(@update_interval, :update_weather) do
-          {:ok, timer} ->
-            # Do initial weather fetch
-            updated_state = update_weather(%{new_state | timer: timer})
-            {:noreply, updated_state}
-
-          {:error, reason} ->
-            Logger.error("Failed to start weather update timer: #{inspect(reason)}")
-            # Continue without timer - weather can still be refreshed manually
-            updated_state = update_weather(new_state)
-            {:noreply, updated_state}
-        end
+    # Schedule periodic updates
+    case :timer.send_interval(@update_interval, :update_weather) do
+      {:ok, timer} ->
+        # Do initial weather fetch
+        updated_state = update_weather(%{state | timer: timer})
+        {:noreply, updated_state}
 
       {:error, reason} ->
-        Logger.warning("No location available yet: #{inspect(reason)}")
-        # Retry initialization in 30 seconds
-        :timer.send_after(30_000, :initialize)
-        {:noreply, state}
+        Logger.error("Failed to start weather update timer: #{inspect(reason)}")
+        # Continue without timer - weather can still be refreshed manually
+        updated_state = update_weather(state)
+        {:noreply, updated_state}
     end
   end
 
@@ -167,75 +123,169 @@ defmodule NameBadge.Weather do
     :ok
   end
 
-  # Private Functions
-
-  defp get_location_from_timezone_service do
-    case NameBadge.TimezoneService.get_location() do
-      {lat, lon, location_name} when not is_nil(lat) and not is_nil(lon) ->
-        {:ok, lat, lon, location_name || "Unknown"}
-
-      _ ->
-        {:error, :no_location}
-    end
-  end
-
-  defp update_weather(%{latitude: nil} = state), do: state
   defp update_weather(%{circuit_breaker_state: :open} = state), do: state
 
   defp update_weather(state) do
-    case fetch_weather(state.latitude, state.longitude) do
-      {:ok, weather} ->
-        Logger.debug("Weather updated successfully")
+    with {:ok, current_weather} <- fetch_weather(),
+         {:ok, next90} <- featch_weather_next90(),
+         {:ok, forecast} <- fetch_forecast(:short) do
+      Logger.debug("Weather updated successfully")
 
-        %{
-          state
-          | weather_data: weather,
-            last_updated: DateTime.utc_now(),
-            failure_count: 0,
-            circuit_breaker_state: :closed
-        }
+      weather_data = %{current: current_weather, next90: next90, forecast_short: forecast}
 
+      %{
+        state
+        | weather_data: weather_data,
+          last_updated: DateTime.utc_now(),
+          failure_count: 0,
+          circuit_breaker_state: :closed
+      }
+    else
       {:error, reason} ->
         Logger.warning("Weather update failed: #{inspect(reason)}")
         record_failure(state, reason)
     end
-  rescue
-    error ->
-      Logger.error("Unexpected error updating weather: #{inspect(error)}")
-      record_failure(state, error)
   end
 
-  defp fetch_weather(latitude, longitude) do
-    params = [
-      latitude: latitude,
-      longitude: longitude,
-      current_weather: true,
-      timezone: "auto"
-    ]
+  defp raw_forecast_to_state(data) do
+    %{
+      "temperature" => %{"value" => temp},
+      "feelsLike" => %{"value" => temp_feels_like},
+      "precipitation" => %{
+        "min" => precip_min,
+        "max" => precip_max,
+        "probability" => _probability
+      },
+      "wind" => %{"speed" => wind_speed, "gust" => wind_gust},
+      "start" => timestamp,
+      "uvIndex" => %{"value" => uv}
+    } =
+      data
 
-    case Req.get(@openmeteo_url, params: params, receive_timeout: 8_000) do
+    # data = %{
+    #   "cloudCover" => %{"fog" => 0, "high" => 0, "low" => 64, "middle" => 0, "value" => 64},
+    #   "dewPoint" => %{"value" => 8},
+    #   "start" => "2026-07-12T07:00:00+02:00",
+    #   "end" => "2026-07-12T08:00:00+02:00",
+    #   "feelsLike" => %{"value" => 9},
+    #   "humidity" => %{"value" => 88.4},
+    #   "precipitation" => %{"max" => 0, "min" => 0, "pop" => 0, "probability" => 0, "value" => 0},
+    #   "pressure" => %{"value" => 1031},
+    #   "symbol" => %{"clouds" => 2, "n" => 3, "precip" => 0, "sunup" => false, "var" => "Sun"},
+    #   "symbolCode" => %{
+    #     "next12Hours" => "fair_day",
+    #     "next1Hour" => "partlycloudy_day",
+    #     "next6Hours" => "fair_day"
+    #   },
+    #   "temperature" => %{
+    #     "probability" => %{"ninetyPercentile" => 11.2, "tenPercentile" => 9.1},
+    #     "value" => 10
+    #   },
+    #   "uvIndex" => %{"value" => 0.6},
+    #   "wind" => %{
+    #     "direction" => 194,
+    #     "gust" => 4.5,
+    #     "probability" => %{"ninetyPercentile" => 1.9, "tenPercentile" => 1.3},
+    #     "speed" => 1.8
+    #   }
+    # }
+
+    weather = %{
+      temperature: temp,
+      feels_like: temp_feels_like,
+      wind_speed: wind_speed,
+      wind_gust: wind_gust,
+      timestamp: timestamp,
+      precipitation: %{min: precip_min, max: precip_max},
+      uv: uv,
+      temperature_unit: "°C",
+      wind_speed_unit: "m/s"
+    }
+  end
+
+  defp raw_weather_data_to_state(data) do
+    %{
+      "temperature" => %{"value" => temp, "feelsLike" => temp_feels_like},
+      "wind" => %{"speed" => wind_speed, "gust" => wind_gust},
+      "created" => timestamp,
+      "uvIndex" => %{"value" => uv}
+    } =
+      data
+
+    weather = %{
+      temperature: temp,
+      feels_like: temp_feels_like,
+      wind_speed: wind_speed,
+      wind_gust: wind_gust,
+      timestamp: timestamp,
+      uv: uv,
+      temperature_unit: "°C",
+      wind_speed_unit: "m/s"
+    }
+  end
+
+  defp fetch_weather() do
+    case Req.get(@yr_now, receive_timeout: 8_000) do
       {:ok, %{status: 200, body: data}} ->
-        current = data["current_weather"]
-        units = data["current_weather_units"] || %{}
+        weather = raw_weather_data_to_state(data)
+        {:ok, weather}
+
+      {:ok, %{status: status_code}} ->
+        Logger.error("Yr API returned #{status_code}")
+        {:error, :api_error}
+
+      {:error, reason} ->
+        Logger.error("Yr API call failed: #{inspect(reason)}")
+        {:error, :network_error}
+    end
+  end
+
+  defp fetch_forecast(type) do
+    type =
+      case type do
+        :short -> "shortIntervals"
+        :long -> "longIntervals"
+        :day -> "dayIntervals"
+      end
+
+    case Req.get(@yr_forecast, receive_timeout: 8_000) do
+      {:ok, %{status: 200, body: %{"created" => timestamp, ^type => data}}} ->
+        weather = Enum.map(data, &raw_forecast_to_state/1)
+        {:ok, weather}
+
+      {:ok, %{status: status_code}} ->
+        Logger.error("Yr API returned #{status_code}")
+        {:error, :api_error}
+
+      {:error, reason} ->
+        Logger.error("Yr API call failed: #{inspect(reason)}")
+        {:error, :network_error}
+    end
+  end
+
+  defp featch_weather_next90() do
+    case Req.get(@yr_next90, receive_timeout: 8_000) do
+      {:ok, %{status: 200, body: data}} ->
+        %{
+          "precipitationForecastDescription" => description,
+          "points" => points,
+          "created" => timestamp
+        } = data
 
         weather = %{
-          temperature: current["temperature"],
-          wind_speed: current["windspeed"],
-          weather_code: current["weathercode"],
-          is_day: current["is_day"] == 1,
-          timestamp: current["time"],
-          temperature_unit: units["temperature"] || "°C",
-          wind_speed_unit: units["windspeed"] || "km/h"
+          description: description,
+          points: points,
+          timestamp: timestamp
         }
 
         {:ok, weather}
 
       {:ok, %{status: status_code}} ->
-        Logger.error("OpenMeteo API returned #{status_code}")
+        Logger.error("Yr API returned #{status_code}")
         {:error, :api_error}
 
       {:error, reason} ->
-        Logger.error("OpenMeteo API call failed: #{inspect(reason)}")
+        Logger.error("Yr API call failed: #{inspect(reason)}")
         {:error, :network_error}
     end
   end

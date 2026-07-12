@@ -11,7 +11,7 @@ Application.start(:nerves_bootstrap)
 # set the time zone database
 config :elixir, :time_zone_database, Tzdata.TimeZoneDatabase
 
-config :name_badge, :timezone, "Europe/Stockholm"
+config :name_badge, :timezone, "Europe/Oslo"
 
 # Customize non-Elixir parts of the firmware. See
 # https://hexdocs.pm/nerves/advanced-configuration.html for details.

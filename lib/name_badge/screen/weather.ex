@@ -7,32 +7,32 @@ defmodule NameBadge.Screen.Weather do
 
   require Logger
 
-  @impl NameBadge.Screen
-  def render(%{weather: nil, loading: true}) do
+  @scenes [:now, :next90, :forecast]
+
+  defp header(text) do
     """
     #show heading: set text(font: "Silkscreen", size: 36pt, weight: 400, tracking: -4pt)
 
-    = Weather
+    = #{text}
 
     #v(16pt)
+    """
+  end
+
+  @impl NameBadge.Screen
+  def render(%{weather: nil, loading: true}) do
+    """
+    #{header("Weather")}
 
     #align(center + horizon)[
       #text(size: 24pt)[Loading weather data...]
-      
-      #text(size: 12pt)[
-        Thanks to Tim Pritlove for contributing this screen!
-      ]
     ]
     """
   end
 
   def render(%{weather: nil, error: error}) do
     """
-    #show heading: set text(font: "Silkscreen", size: 36pt, weight: 400, tracking: -4pt)
-
-    = Weather
-
-    #v(16pt)
+    #{header("Weather")}
 
     #place(center + horizon,
       stack(dir: ttb, spacing: 8pt,
@@ -43,58 +43,136 @@ defmodule NameBadge.Screen.Weather do
     """
   end
 
-  def render(%{weather: weather, location: location}) do
-    temp_display = format_temperature(weather.temperature, weather.temperature_unit)
-    condition = weather_condition_text(weather.weather_code, weather.is_day)
-    wind_display = format_wind_speed(weather.wind_speed, weather.wind_speed_unit)
+  def render(%{weather: %{current: current}, scene: :now}) do
+    temp_display =
+      format_temperature(current.temperature, current.temperature_unit)
+
+    # condition = weather_condition_text(weather.weather_code, weather.is_day)
+    wind_display =
+      format_wind_speed(
+        current.wind_speed,
+        current.wind_gust,
+        current.wind_speed_unit
+      )
 
     """
-    #show heading: set text(font: "Silkscreen", size: 36pt, weight: 400, tracking: -4pt)
-
-    = Weather
-
-    #v(16pt)
-
     #align(center)[
       #stack(dir: ttb, spacing: 14pt,
-
         // Location
-        text(size: 16pt, style: "italic")[#{location || "Unknown Location"}],
+        // text(size: 16pt, style: "italic")[Trondheim],
 
         // Temperature (main display)
         text(size: 48pt, weight: 600)[#{temp_display}],
 
-        // Weather condition
-        text(size: 18pt)[#{condition}],
-
         // Wind speed
-        text(size: 14pt)[Wind: #{wind_display}],
+        text(size: 20pt)[Vind: #{wind_display}],
+
+        // UV
+        text(size: 20pt)[UV: #{current.uv}],
 
         // Last updated
-        text(size: 12pt, fill: gray)[#{format_last_updated(weather.timestamp)}]
+        text(size: 16pt)[Sist oppdatert: #{format_timestamp(current.timestamp)}]
       )
+    ]
+    """
+  end
+
+  def render(%{weather: %{next90: next90}, scene: :next90}) do
+    %{points: points, timestamp: timestamp, description: description} = next90
+    scale = 3
+    max_height = 3 * scale
+    chart_values = Enum.map(points, fn %{"chartValue" => v} -> v end)
+    scaled_chart_values = Enum.map(chart_values, fn v -> round(4 * v) end)
+
+    stacks =
+      Enum.map(scaled_chart_values, fn v ->
+        stack =
+          (List.duplicate(~s(histogram_dot[.]), max_height - v) ++
+             List.duplicate("histogram_dot[\\#]", v))
+          |> Enum.join(", ")
+
+        "stack(dir: ttb, #{stack})"
+      end)
+
+    """
+    #let histogram_dot(body) = context {
+      let size = measure("#")
+      box(height: size.height, width: size.width, text(body))
+    }
+
+    #align(center)[
+      #rect(stack(dir:ltr, #{Enum.join(stacks, ", ")}))
+    ]
+
+    #align(center)[
+      #stack(dir: ttb, spacing: 14pt,
+        text(size: 20pt)[#{description}],
+
+        text(size: 14pt)[Sist oppdatert: #{format_timestamp(timestamp)}],
+      )
+    ]
+    """
+  end
+
+  def render(%{weather: %{forecast_short: forecast}, scene: :forecast}) do
+    [now | _] = forecast
+
+    next_8 = Enum.take(forecast, 8)
+
+    times =
+      Enum.map(next_8, fn forecast -> "[#{timestamp_hour(forecast.timestamp)}]" end)
+      |> Enum.join(", ")
+
+    temps =
+      Enum.map(next_8, fn forecast -> "[#{round(forecast.temperature)}]" end) |> Enum.join(", ")
+
+    precips =
+      Enum.map(next_8, fn forecast ->
+        if forecast.precipitation.max == forecast.precipitation.min do
+          "[#{forecast.precipitation.max}]"
+        else
+          "[#{forecast.precipitation.min} - #{forecast.precipitation.max}]"
+        end
+      end)
+      |> Enum.join(", ")
+
+    uvs = Enum.map(next_8, fn forecast -> "[#{round(forecast.uv)}]" end) |> Enum.join(", ")
+
+    """
+    #{header("Neste 8 timer")}
+
+    #align(center + horizon)[
+    #table(
+      columns: #{length(next_8) + 1},
+      
+      [*Tid*], #{times},
+      [*Temp*], #{temps},
+      [*Regn*], #{precips},
+      [*UV*], #{uvs}
+    )
     ]
     """
   end
 
   @impl NameBadge.Screen
   def mount(_args, screen) do
-    # Get initial weather data and location
+    # Get initial weather data
     weather = NameBadge.Weather.get_current_weather()
-    location = NameBadge.Weather.get_location_name()
 
     screen =
       case weather do
         nil ->
           screen
-          |> assign(weather: nil, loading: true, location: location)
+          |> assign(weather: nil, loading: true, scene: :now)
           |> assign(button_hints: %{a: "Refresh"})
 
         weather_data ->
           screen
-          |> assign(weather: weather_data, loading: false, location: location)
-          |> assign(button_hints: %{a: "Refresh"})
+          |> assign(weather: weather_data, loading: false, scene: :now)
+          |> assign(button_hints: %{a: "Refresh", b: "Next"})
       end
+
+    Process.send_after(self(), :check_weather_update, 2_000)
 
     {:ok, screen}
   end
@@ -116,8 +194,12 @@ defmodule NameBadge.Screen.Weather do
     {:noreply, screen}
   end
 
+  defp next_scene(:now), do: :next90
+  defp next_scene(:next90), do: :forecast
+  defp next_scene(:forecast), do: :now
+
   def handle_button(:button_2, :single_press, screen) do
-    # Button B does nothing - navigation back is handled by long press on button 2
+    screen = screen |> assign(scene: next_scene(screen.assigns.scene))
     {:noreply, screen}
   end
 
@@ -125,8 +207,9 @@ defmodule NameBadge.Screen.Weather do
 
   @impl NameBadge.Screen
   def handle_info(:check_weather_update, screen) do
+    Process.send_after(self(), :check_weather_update, 10_000)
+
     weather = NameBadge.Weather.get_current_weather()
-    location = NameBadge.Weather.get_location_name()
 
     screen =
       case weather do
@@ -135,14 +218,13 @@ defmodule NameBadge.Screen.Weather do
             weather: nil,
             loading: false,
             error: "Unable to fetch weather data",
-            location: location
           )
+          {:noreply, screen}
 
         weather_data ->
-          assign(screen, weather: weather_data, loading: false, error: nil, location: location)
+          screen = screen |> assign(weather: weather_data, loading: false, error: nil)
+          {:noreply, screen}
       end
-
-    {:noreply, screen}
   end
 
   # Private helper functions
@@ -157,70 +239,28 @@ defmodule NameBadge.Screen.Weather do
 
   defp format_temperature(_, _), do: "N/A"
 
-  defp format_wind_speed(speed, unit) when is_number(speed) and is_binary(unit) do
-    "#{round(speed)} #{unit}"
+  defp format_wind_speed(speed, gust, unit)
+       when is_number(speed) and is_number(gust) and is_binary(unit) do
+    "#{round(speed)} (#{gust}) #{unit}"
   end
 
-  defp format_wind_speed(speed, _unit) when is_number(speed) do
-    "#{round(speed)} km/h"
-  end
-
-  defp format_wind_speed(_, _), do: "N/A"
-
-  defp format_last_updated(timestamp) when is_binary(timestamp) do
-    case DateTime.from_iso8601(timestamp <> ":00Z") do
-      {:ok, dt, _} ->
-        now = DateTime.utc_now()
-        diff_minutes = div(DateTime.diff(now, dt), 60)
-
-        cond do
-          diff_minutes < 1 -> "Just now"
-          diff_minutes < 60 -> "#{diff_minutes}m ago"
-          true -> "#{div(diff_minutes, 60)}h ago"
-        end
+  defp timestamp_hour(timestamp) when is_binary(timestamp) do
+    case NaiveDateTime.from_iso8601(timestamp) do
+      {:ok, dt} ->
+        dt.hour
 
       _ ->
-        "Recently"
+        "ERR"
     end
   end
 
-  defp format_last_updated(_), do: "Recently"
+  defp format_timestamp(timestamp) when is_binary(timestamp) do
+    case NaiveDateTime.from_iso8601(timestamp) do
+      {:ok, dt} ->
+        Calendar.strftime(dt, "%H:%M")
 
-  defp weather_condition_text(code, is_day) when is_number(code) do
-    case code do
-      0 -> "Clear sky"
-      1 -> "Mainly clear"
-      2 -> "Partly cloudy"
-      3 -> "Overcast"
-      45 -> "Fog"
-      48 -> "Depositing rime fog"
-      51 -> "Light drizzle"
-      53 -> "Moderate drizzle"
-      55 -> "Dense drizzle"
-      56 -> "Light freezing drizzle"
-      57 -> "Dense freezing drizzle"
-      61 -> "Slight rain"
-      63 -> "Moderate rain"
-      65 -> "Heavy rain"
-      66 -> "Light freezing rain"
-      67 -> "Heavy freezing rain"
-      71 -> "Slight snow fall"
-      73 -> "Moderate snow fall"
-      75 -> "Heavy snow fall"
-      77 -> "Snow grains"
-      80 -> "Slight rain showers"
-      81 -> "Moderate rain showers"
-      82 -> "Violent rain showers"
-      85 -> "Slight snow showers"
-      86 -> "Heavy snow showers"
-      95 -> "Thunderstorm"
-      96 -> "Thunderstorm with hail"
-      99 -> "Thunderstorm with heavy hail"
-      _ -> if is_day, do: "Unknown (day)", else: "Unknown (night)"
+      _ ->
+        "ERR"
     end
-  end
-
-  defp weather_condition_text(_, is_day) do
-    if is_day, do: "Unknown (day)", else: "Unknown (night)"
   end
 end
