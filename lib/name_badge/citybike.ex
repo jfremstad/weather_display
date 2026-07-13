@@ -96,6 +96,7 @@ defmodule NameBadge.CityBike do
     %{body: %{"data" => %{"stations" => stations}}} =
       Req.get!(@base <> "/station_information.json", headers: @headers)
 
+    Logger.info("Refreshed station info")
     Map.new(stations, fn %{"name" => name, "station_id" => id} -> {name, id} end)
   end
 
@@ -106,6 +107,7 @@ defmodule NameBadge.CityBike do
     %{body: %{"data" => %{"stations" => stations}}} =
       Req.get!(@base <> "/station_status.json", headers: @headers)
 
+    Logger.info("Refreshed station status")
     Map.new(stations, fn s -> {s["station_id"], s} end)
   end
 end
