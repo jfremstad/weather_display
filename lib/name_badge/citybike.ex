@@ -55,7 +55,7 @@ defmodule NameBadge.CityBike do
         {:noreply, updated_state}
 
       {:error, reason} ->
-        Logger.error("Failed to start CityBike update timer: #{inspect reason}")
+        Logger.error("Failed to start CityBike update timer: #{inspect(reason)}")
         updated_state = update_status(state)
         {:noreply, updated_state}
     end
