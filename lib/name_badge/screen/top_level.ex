@@ -5,7 +5,6 @@ defmodule NameBadge.Screen.TopLevel do
 
   @base_screens [
     {Screen.Weather, "Weather"},
-    {Screen.NameBadge, "Name Badge"},
     {Screen.Settings, "Device Settings"}
   ]
 

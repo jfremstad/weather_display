@@ -7,8 +7,6 @@ defmodule NameBadge.Screen.Weather do
 
   require Logger
 
-  @scenes [:now, :next90, {:forecast, :page1}]
-
   defp header(text) do
     """
     #show heading: set text(font: "Silkscreen", size: 36pt, weight: 400, tracking: -4pt)
@@ -190,12 +188,17 @@ defmodule NameBadge.Screen.Weather do
 
   @impl NameBadge.Screen
   def handle_button(:button_1, :single_press, %{assigns: %{scene: {:forecast, page}}} = screen) do
-    {new_page, label} = case page do
-      :page1 -> {:page2, "Earlier"}
-      :page2 -> {:page1, "Later"}
-    end
-    screen = screen |> assign(scene: {:forecast, new_page})
-          |> assign(button_hints: %{a: label, b: "Next"})
+    {new_page, label} =
+      case page do
+        :page1 -> {:page2, "Earlier"}
+        :page2 -> {:page1, "Later"}
+      end
+
+    screen =
+      screen
+      |> assign(scene: {:forecast, new_page})
+      |> assign(button_hints: %{a: label, b: "Next"})
+
     {:noreply, screen}
   end
 
@@ -216,10 +219,6 @@ defmodule NameBadge.Screen.Weather do
     {:noreply, screen}
   end
 
-  defp next_scene(:now), do: :next90
-  defp next_scene(:next90), do: {:forecast, :page1}
-  defp next_scene({:forecast, _}), do: :now
-
   def handle_button(:button_2, :single_press, screen) do
     next = next_scene(screen.assigns.scene)
 
@@ -229,11 +228,6 @@ defmodule NameBadge.Screen.Weather do
           screen
           |> assign(scene: next)
           |> assign(button_hints: %{a: "Later", b: "Next"})
-
-        {:forecast, :page2} ->
-          screen
-          |> assign(scene: next)
-          |> assign(button_hints: %{a: "Earlier", b: "Next"})
 
         _ ->
           screen |> assign(scene: next)
@@ -304,4 +298,8 @@ defmodule NameBadge.Screen.Weather do
   end
 
   defp round_table_value(v), do: "[#{round(v)}]"
+
+  defp next_scene(:now), do: :next90
+  defp next_scene(:next90), do: {:forecast, :page1}
+  defp next_scene({:forecast, _}), do: :now
 end

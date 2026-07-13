@@ -42,12 +42,15 @@ defmodule NameBadge.Layout do
       |> DateTime.shift_zone!(NameBadge.timezone())
       |> Calendar.strftime("%H:%M")
 
+    %{"num_bikes_available" => bikes} = NameBadge.CityBike.get_station_status("Hesthagen")
+
     """
     #place(
       top + right,
       dy: -24pt,
       dx: 24pt,
       box(height: 16pt, stack(dir: ltr, spacing: 8pt,
+        align(horizon, text(size: 14pt)[Bike:#{bikes}]),
         align(horizon, text(size: 14pt)[#{current_time}]),
         align(horizon, text(size: 14pt)[#{battery_percentage} %]),
         image("images/icons/#{wifi_icon}"),
