@@ -7,7 +7,7 @@ defmodule NameBadge.Screen.Weather do
 
   require Logger
 
-  @scenes [:now, :next90, :forecast]
+  @scenes [:now, :next90, {:forecast, :page1}]
 
   defp header(text) do
     """
@@ -79,10 +79,11 @@ defmodule NameBadge.Screen.Weather do
 
   def render(%{weather: %{next90: next90}, scene: :next90}) do
     %{points: points, timestamp: timestamp, description: description} = next90
-    scale = 3
-    max_height = 3 * scale
+    scale = 4
+    yr_max_chart_value = 3
+    max_height = yr_max_chart_value * scale
     chart_values = Enum.map(points, fn %{"chartValue" => v} -> v end)
-    scaled_chart_values = Enum.map(chart_values, fn v -> round(4 * v) end)
+    scaled_chart_values = Enum.map(chart_values, fn v -> round(scale * v) end)
 
     stacks =
       Enum.map(scaled_chart_values, fn v ->
@@ -114,23 +115,27 @@ defmodule NameBadge.Screen.Weather do
     """
   end
 
-  def render(%{weather: %{forecast_short: forecast}, scene: :forecast}) do
-    [now | _] = forecast
-
-    next_8 = Enum.take(forecast, 8)
+  def render(%{weather: %{forecast_short: forecast}, scene: {:forecast, page}}) do
+    short_forecast =
+      case page do
+        :page1 -> Enum.take(forecast, 8)
+        :page2 -> forecast |> Enum.drop(8) |> Enum.take(8)
+      end
 
     times =
-      Enum.map(next_8, fn forecast -> "[#{timestamp_hour(forecast.timestamp)}]" end)
+      Enum.map(short_forecast, fn forecast -> "[#{timestamp_hour(forecast.timestamp)}]" end)
       |> Enum.join(", ")
 
     temps =
-      Enum.map(next_8, fn forecast -> "[#{round(forecast.temperature)}]" end) |> Enum.join(", ")
+      Enum.map(short_forecast, fn forecast -> round_table_value(forecast.temperature) end)
+      |> Enum.join(", ")
 
     dewpoints =
-      Enum.map(next_8, fn forecast -> "[#{round(forecast.dewpoint)}]" end) |> Enum.join(", ")
+      Enum.map(short_forecast, fn forecast -> round_table_value(forecast.dewpoint) end)
+      |> Enum.join(", ")
 
     precips =
-      Enum.map(next_8, fn forecast ->
+      Enum.map(short_forecast, fn forecast ->
         if forecast.precipitation.max == forecast.precipitation.min do
           "[#{forecast.precipitation.max}]"
         else
@@ -139,14 +144,16 @@ defmodule NameBadge.Screen.Weather do
       end)
       |> Enum.join(", ")
 
-    uvs = Enum.map(next_8, fn forecast -> "[#{round(forecast.uv)}]" end) |> Enum.join(", ")
+    uvs =
+      Enum.map(short_forecast, fn forecast -> round_table_value(forecast.uv) end)
+      |> Enum.join(", ")
 
     """
     #{header("Neste 8 timer")}
 
     #align(center + horizon)[
     #table(
-      columns: #{length(next_8) + 1},
+      columns: #{length(short_forecast) + 1},
       
       [*Tid*], #{times},
       [*Temp*], #{temps},
@@ -182,6 +189,17 @@ defmodule NameBadge.Screen.Weather do
   end
 
   @impl NameBadge.Screen
+  def handle_button(:button_1, :single_press, %{assigns: %{scene: {:forecast, page}}} = screen) do
+    {new_page, label} = case page do
+      :page1 -> {:page2, "Earlier"}
+      :page2 -> {:page1, "Later"}
+    end
+    screen = screen |> assign(scene: {:forecast, new_page})
+          |> assign(button_hints: %{a: label, b: "Next"})
+    {:noreply, screen}
+  end
+
+  @impl NameBadge.Screen
   def handle_button(:button_1, :single_press, screen) do
     # Refresh weather data
     Logger.info("Refreshing weather data...")
@@ -199,11 +217,28 @@ defmodule NameBadge.Screen.Weather do
   end
 
   defp next_scene(:now), do: :next90
-  defp next_scene(:next90), do: :forecast
-  defp next_scene(:forecast), do: :now
+  defp next_scene(:next90), do: {:forecast, :page1}
+  defp next_scene({:forecast, _}), do: :now
 
   def handle_button(:button_2, :single_press, screen) do
-    screen = screen |> assign(scene: next_scene(screen.assigns.scene))
+    next = next_scene(screen.assigns.scene)
+
+    screen =
+      case next do
+        {:forecast, :page1} ->
+          screen
+          |> assign(scene: next)
+          |> assign(button_hints: %{a: "Later", b: "Next"})
+
+        {:forecast, :page2} ->
+          screen
+          |> assign(scene: next)
+          |> assign(button_hints: %{a: "Earlier", b: "Next"})
+
+        _ ->
+          screen |> assign(scene: next)
+      end
+
     {:noreply, screen}
   end
 
@@ -215,21 +250,20 @@ defmodule NameBadge.Screen.Weather do
 
     weather = NameBadge.Weather.get_current_weather()
 
-    screen =
-      case weather do
-        nil ->
-          assign(screen,
-            weather: nil,
-            loading: false,
-            error: "Unable to fetch weather data"
-          )
+    case weather do
+      nil ->
+        assign(screen,
+          weather: nil,
+          loading: false,
+          error: "Unable to fetch weather data"
+        )
 
-          {:noreply, screen}
+        {:noreply, screen}
 
-        weather_data ->
-          screen = screen |> assign(weather: weather_data, loading: false, error: nil)
-          {:noreply, screen}
-      end
+      weather_data ->
+        screen = screen |> assign(weather: weather_data, loading: false, error: nil)
+        {:noreply, screen}
+    end
   end
 
   # Private helper functions
@@ -268,4 +302,6 @@ defmodule NameBadge.Screen.Weather do
         "ERR"
     end
   end
+
+  defp round_table_value(v), do: "[#{round(v)}]"
 end

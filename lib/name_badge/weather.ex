@@ -191,7 +191,7 @@ defmodule NameBadge.Weather do
     #   }
     # }
 
-    weather = %{
+    %{
       temperature: temp,
       feels_like: temp_feels_like,
       wind_speed: wind_speed,
@@ -214,7 +214,7 @@ defmodule NameBadge.Weather do
     } =
       data
 
-    weather = %{
+    %{
       temperature: temp,
       feels_like: temp_feels_like,
       wind_speed: wind_speed,
