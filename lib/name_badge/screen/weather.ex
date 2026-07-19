@@ -41,7 +41,7 @@ defmodule NameBadge.Screen.Weather do
     """
   end
 
-  def render(%{weather: %{current: current}, scene: :now}) do
+  def render(%{weather: %{current: current, forecast_short: forecast}, scene: :now}) do
     temp_display =
       format_temperature(current.temperature, current.temperature_unit)
 
@@ -53,6 +53,10 @@ defmodule NameBadge.Screen.Weather do
         current.wind_speed_unit
       )
 
+    [next_hour | _] = forecast
+
+    feels_like = format_temperature(next_hour.feels_like)
+
     """
     #align(center)[
       #stack(dir: ttb, spacing: 14pt,
@@ -61,6 +65,11 @@ defmodule NameBadge.Screen.Weather do
 
         // Temperature (main display)
         text(size: 48pt, weight: 600)[#{temp_display}],
+
+        text(size: 20pt)[Føles som: #{feels_like}],
+
+        // Humidity
+        text(size: 20pt)[Fukt: #{next_hour.humidity} %],
 
         // Wind speed
         text(size: 20pt)[Vind: #{wind_display}],
@@ -128,6 +137,14 @@ defmodule NameBadge.Screen.Weather do
       Enum.map(short_forecast, fn forecast -> round_table_value(forecast.temperature) end)
       |> Enum.join(", ")
 
+    winds =
+      Enum.map(short_forecast, fn forecast -> round_table_value(forecast.wind_speed) end)
+      |> Enum.join(", ")
+
+    humidities =
+      Enum.map(short_forecast, fn forecast -> round_table_value(forecast.humidity) end)
+      |> Enum.join(", ")
+
     dewpoints =
       Enum.map(short_forecast, fn forecast -> round_table_value(forecast.dewpoint) end)
       |> Enum.join(", ")
@@ -156,6 +173,8 @@ defmodule NameBadge.Screen.Weather do
       [*Tid*], #{times},
       [*Temp*], #{temps},
       [*Dugg*], #{dewpoints},
+      [*Fukt*], #{humidities},
+      [*Vind*], #{winds},
       [*Regn*], #{precips},
       [*UV*], #{uvs}
     )
@@ -262,19 +281,13 @@ defmodule NameBadge.Screen.Weather do
 
   # Private helper functions
 
-  defp format_temperature(temp, unit) when is_number(temp) and is_binary(unit) do
+  defp format_temperature(temp, unit \\ "°C") when is_number(temp) and is_binary(unit) do
     "#{round(temp)}#{unit}"
   end
 
-  defp format_temperature(temp, _unit) when is_number(temp) do
-    "#{round(temp)}°C"
-  end
-
-  defp format_temperature(_, _), do: "N/A"
-
   defp format_wind_speed(speed, gust, unit)
        when is_number(speed) and is_number(gust) and is_binary(unit) do
-    "#{round(speed)} (#{gust}) #{unit}"
+    "#{speed} (#{gust}) #{unit}"
   end
 
   defp timestamp_hour(timestamp) when is_binary(timestamp) do

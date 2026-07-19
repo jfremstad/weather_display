@@ -157,6 +157,7 @@ defmodule NameBadge.Weather do
         "max" => precip_max,
         "probability" => _probability
       },
+      "humidity" => %{"value" => humidity},
       "wind" => %{"speed" => wind_speed, "gust" => wind_gust},
       "start" => timestamp,
       "uvIndex" => %{"value" => uv}
@@ -197,6 +198,7 @@ defmodule NameBadge.Weather do
       wind_speed: wind_speed,
       wind_gust: wind_gust,
       dewpoint: dewpoint,
+      humidity: humidity,
       timestamp: timestamp,
       precipitation: %{min: precip_min, max: precip_max},
       uv: uv,
